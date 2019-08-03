@@ -1,0 +1,56 @@
+@mycon = ias;
+--@db = erm; not supported yet
+connect @mycon;
+--use @db;
+use erm;
+
+@myval1 = 5;
+@myval2 = 'Hello';
+
+--Comment #1 rest of line
+/* Comment
+     multi-line block */
+
+@eql_log_level=1;
+
+@scope = 'AUTOMATIC';
+
+select *
+from erm_calc;
+/*
+select count(*) as hits 
+from proc 
+where scope = @scope;
+
+
+select col1, col2
+ from test1		-- comment inside statement to remove
+where col2 = @myval1;
+*/
+/*
+@eql_log_level='Hello'; -- throws an error
+
+--Sample SQL Server execution
+--exec testsp \@parm1 = @myval1;
+
+connect us-prd;	-- test for static name and database switch
+*/
+/*
+select col1, col2
+ from test1		-- comment inside statement to remove
+where col2 = @myval1
+and col5 = @Myval2
+  and col6 = @myval1;
+   
+@testCursor = select 
+	a 
+	from b 
+	where c= @myval2;
+	
+   -- spaced comment
+   /* stuff 'quoted inside */
+   -- stuff ' quoted inline
+/*
+  @test1 = "/* quoted comment stays in string";
+  @test2 = "-- commented quote stays in string";
+  */

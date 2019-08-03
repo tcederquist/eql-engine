@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xml>
+<Configuration status="INFO">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+		<logger name="com.ias.rest.language.eql.api.EQLMain" level="info" />
+		<logger name="com.ias.language.objects.EQLInstruction" level="info" />
+		<logger name="com.ias.rest.language.eql.imp.EQLEngine" level="info" />
+		<logger name="com.ias.rest.container.utility.HostUtilizationMetrics" level="info" />
+		<logger name="com.ias.kerberos.KerberosTicketService" level="info" />
+		<logger name="org.eclipse.jetty" level="info" />
+		<logger name="org.eclipse.jetty.server.Server" level="info" />
+		
+		<root level="info">
+			<AppenderRef ref="Console" />
+		</root>
+    </Loggers>
+</Configuration>
