@@ -27,22 +27,20 @@ public class EQLMain {
 		int returnCode = -1;
 		
 		System.out.println("");
-		System.out.println("               ███████╗ ██████╗ ██╗            ");
-		System.out.println("               ██╔════╝██╔═══██╗██║            ");
-		System.out.println("               █████╗  ██║   ██║██║            ");
-		System.out.println("               ██╔══╝  ██║▄▄ ██║██║            ");
-		System.out.println("               ███████╗╚██████╔╝███████╗       ");
-		System.out.println("               ╚══════╝ ╚══▀▀═╝ ╚══════╝       ");
-		System.out.println("                   Extended SQL                ");
-		System.out.println("       ██████╗ ██╗   ██╗    ██╗ █████╗ ███████╗");
-		System.out.println("       ██╔══██╗╚██╗ ██╔╝    ██║██╔══██╗██╔════╝");
-		System.out.println("       ██████╔╝ ╚████╔╝     ██║███████║███████╗");
-		System.out.println("       ██╔══██╗  ╚██╔╝      ██║██╔══██║╚════██║");
-		System.out.println("       ██████╔╝   ██║       ██║██║  ██║███████║");
-		System.out.println("       ╚═════╝    ╚═╝       ╚═╝╚═╝  ╚═╝╚══════╝");
-		System.out.println("       https://github.com/tcederquist/eql-engine");
-		System.out.println("       Author: Tim Cederquist");
-		System.out.println("       Apache License v2.0");
+		System.out.println("                __________    __ ");
+		System.out.println("               / ____/ __ \\  / / ");
+		System.out.println("              / __/ / / / / / /  ");
+		System.out.println("             / /___/ /_/ / / /___");
+		System.out.println("            /_____/\\___\\_\\/_____/");
+		System.out.println("                 Extended SQL                ");
+		System.out.println("          ______  __   _______   _____");
+		System.out.println("         / __ ) \\/ /  /  _/   | / ___/");
+		System.out.println("        / __  |\\  /   / // /| | \\__ \\");
+		System.out.println("       / /_/ / / /  _/ // ___ |___/ /");
+		System.out.println("      /_____/ /_/  /___/_/  |_/____/");
+		System.out.println("   https://github.com/tcederquist/eql-engine");
+		System.out.println("           Author: Tim Cederquist");
+		System.out.println("            Apache License v2.0");
 		System.out.println("");
 
 		try {
