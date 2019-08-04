@@ -48,9 +48,9 @@ public class EQLMain {
 			//String[] a = new String[]{ "-p=eql_log_level:1,val:1,val2:\"hello\",val3:'hi there!',val_4:Stuff", "-f=d:\\test\\test.sql", "-c=d:\\test\\test.ini" };
 			//String[] a = new String[]{ "-p=val:1,val2:'hello',val3:'hi there!',val_4:Stuff", "-f=d:\\test\\test.sql", "-c=d:\\test\\test.ini", "-r=0" };
 			//String[] a = new String[]{ "-p=eql_log_level:1,mycon:ias,myval1:5,myval2:Hello,scope:AUTOMATIC,val:1,val2:hello,val3:hi there!,val_4:Stuff", "-f=d:\\test\\test.sql", "-c=d:\\test\\test.ini", "-r=8" };
-			String[] a = new String[]{ "-f=d:\\test\\test.sql" };
+			//String[] a = new String[]{ "-f=d:\\test\\test.sql" };
 
-			CommandLine cmdParms = processArgs(a);
+			CommandLine cmdParms = processArgs(args);
 			String sqlFilename = cmdParms.getOptionValue("f");
 			String cfgFilename = cmdParms.getOptionValue("c");
 			boolean verbose = cmdParms.hasOption('v');
