@@ -85,7 +85,7 @@ public class EQLObject implements Serializable, Closeable {
 				if (sRawVal.startsWith("'") && sRawVal.endsWith("'")) {
 					return sRawVal.substring(1, sRawVal.length() - 1);
 				} else {
-					log.warn("String returned didn't have matching quotes start and end of value (continuing):" + sRawVal);
+					log.warn("String returned didn't have matching single quotes start and end of value (continuing):" + sRawVal);
 					return sRawVal;
 				}
 			} else if (type == types.rawText) {

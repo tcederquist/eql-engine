@@ -34,32 +34,54 @@ public class EQLCommandLineDriver extends EQLUtilities {
 	protected Connection conn;
 	protected int completedLine;
 	protected int queryTimeout;
+	protected int lineExecuting;
 
 	public EQLCommandLineDriver(Properties config) {
 		super(config);
 		this.queryTimeout = -1;	// do nothing
 		this.vars = new TreeMap<String, EQLObject>(String.CASE_INSENSITIVE_ORDER);
-		String debugLvl = config.getProperty("eqlLogLevel", "2");
-		try {
-			this.logLevel = Integer.parseInt(debugLvl);
-		} catch (NumberFormatException e) {
-			log.warn("EQLEngine startup config value illegal - default to 1 - value supplied:{}", debugLvl);
+		if (config != null) {
+			String debugLvl = config.getProperty("eqlLogLevel", "2");
+			try {
+				this.logLevel = Integer.parseInt(debugLvl);
+			} catch (NumberFormatException e) {
+				log.warn("EQLEngine startup config value illegal - default to 1 - value supplied:{}", debugLvl);
+			}
 		}
 		this.errorStack = new ArrayList<EQLException>();
 		this.instructions = null;
 		this.conn = null;
 		this.completedLine = 0;
+		this.lineExecuting = 0;
 	}
 	
-	public boolean compile(String code) throws IOException {
+	public boolean compile(String code) {
 		try {
 			this.instructions = EQLInstruction.InstructionFactory(code);
 			log.debug("Compiled {} instructions", this.instructions.size());
-		} catch (EQLException e) {
+		} catch (IOException | EQLException e) {
 			this.errorMsg("compile", e.getMessage());
 			return false;
 		}
 		return true;
+	}
+	
+	public int getLastCompletedInstructionNumber() {
+		return this.completedLine;
+	}
+	
+	public void setVariableDirect(String name, String value) {
+		EQLObject val = new EQLObject(value);
+		this.vars.put(name, val);
+		if (name.equals("eql_timeout_s")) {
+			this.queryTimeout = Integer.parseInt(value);
+			this.infoMsg("engine", "Query timeout for future statements is set to " + this.queryTimeout + " seconds.");
+		}
+		if (name.equals("eql_log_level")) {
+			this.logLevel = Integer.parseInt(value);
+			this.infoMsg("engine", "Log level set to #" + value);
+		}
+		this.debugMsg("engine", "Assignment @" + name + " to value:" + value);
 	}
 	
 	/**
@@ -67,14 +89,42 @@ public class EQLCommandLineDriver extends EQLUtilities {
 	 * @throws EQLException
 	 */
 	public void run(int startingLine) {
-		int lineExecuting = 0;
+		this.lineExecuting = 0;
+		EQLInstruction lastConnection = null;
+		EQLInstruction lastConnUse = null;
 		for(EQLInstruction instruct:instructions) {
-			lineExecuting++;
-			if (lineExecuting > startingLine) {
+			this.lineExecuting++;
+			if (instruct.getFunction().equals("connect")) {
+				lastConnection = instruct;  // keep a reference to the last connection to process before actual lines start
+				lastConnUse = null; // reset for any connection
+			}
+			if (instruct.getFunction().equals("use")) {
+				lastConnUse = instruct;
+			}
+			if (this.lineExecuting > startingLine) {
+				if (startingLine > 0 && lastConnection != null && !instruct.getFunction().equals("connect")) {  // if instruct is not a connection, process the last connection request
+					try {
+						this.connect(lastConnection);
+						lastConnection = null;
+						if (lastConnUse != null) {
+							if (this.exec(lastConnUse, true, this.lineExecuting) == null) {
+								log.error("Unable to execute use after injection connection on restart:", lastConnUse.toString());
+								break;
+							} else {
+								log.info("Use after injection connection succeded: {}", lastConnUse.getAssignVal());
+							}
+							lastConnUse = null;
+						}
+					} catch (EQLException e) {
+						this.errorMsg("engine", "Unable to make injection connection, error:" + e.getMessage());
+						break;
+					}
+				}
+				
 				//TODO put the function logic into the exec function so it can handle any command handed to it
 				if (instruct.getFunction().equals("var")) {
 					EQLObject val = instruct.getAssignVal();
-					//this.debugMsg("engine", "Assignment of '" + instruct.getAssignName() + "' to value:" + instruct.getAssignVal());
+					this.debugMsg("engine", "Assignment @" + instruct.getAssignName() + " to value:" + instruct.getAssignVal());
 					EQLObject oldVal = this.vars.put(instruct.getAssignName(), val);
 					if (oldVal != null && oldVal.getType() == EQLObject.types.cursor) {
 						this.closeCursorIfLastReference(instruct.getAssignName(), oldVal);
@@ -110,7 +160,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 					try {
 						this.connect(instruct);
 					} catch (EQLException e) {
-						this.errorMsg("engine", "Unable to assign value from cursor, error:" + e.getMessage());
+						this.errorMsg("engine", "Unable to make requested connection, error:" + e.getMessage());
 						break;
 					}
 				} else if (instruct.getFunction().equals("print")) {
@@ -118,17 +168,23 @@ public class EQLCommandLineDriver extends EQLUtilities {
 					try {
 						this.print(instruct);
 					} catch (EQLException e) {
-						this.errorMsg("engine", "Unable to assign value from cursor, error:" + e.getMessage());
+						this.errorMsg("engine", "Unable to print message, error:" + e.getMessage());
 						break;
 					}
 				} else {
 					//Pass-through command to connection
-					if (this.exec(instruct, true) == null)
+					if (this.exec(instruct, true, this.lineExecuting) == null)
 						break;
 				}
 			} else {
-				this.infoMsg("engine", "Skipping line #" + lineExecuting + ". Lead of line :(" + instruct.getAssignName().substring(0, 20).replace('\n', ' ') + "...)");
+				String asgnName = instruct.getAssignName();
+				if (asgnName == null) {
+					this.infoMsg("engine", "Skipping instruction #" + this.lineExecuting + ". Lead of line :(" + StringUtils.substring(instruct.getAssignVal().toString(), 0, 20).replace('\n', ' ') + "...)");
+				} else {
+					this.infoMsg("engine", "Skipping instruction #" + this.lineExecuting + ". Lead of line :(" + StringUtils.substring(asgnName, 0, 20).replace('\n', ' ') + "...)");
+				}
 			}
+			this.completedLine = this.lineExecuting;
 		}
 	}
 	
@@ -213,7 +269,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 		log.debug("Print found instruction has {} parts", parts.length);
 		
 //		if (parts.length == 0) {		// Empty line support 'Print;'
-//			this.infoMsg("Print", "");
+//			this.infoMsg("Print ", "");
 //		}
 		
 		for(String part : parts) {
@@ -228,7 +284,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 					item = this.pullCursorColumn(parmName, part);
 				} catch (SQLException | IOException e) {
 					if (sbLine.length() > 0) {	// Drain any static text before throwing an error
-						this.infoMsg("Print", sbLine.toString());
+						this.infoMsg("Print ", sbLine.toString());
 					}
 					this.errorMsg("engine", "Unable to assign value from cursor, error:" + e.getMessage());
 					return false;
@@ -236,7 +292,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 
 				if (item == null) {
 					if (sbLine.length() > 0) {	// Drain any static text before print cursor entries
-						this.infoMsg("Print", sbLine.toString());
+						this.infoMsg("Print ", sbLine.toString());
 					}
 					this.errorMsg("print ln#" + inst.getStartLine(), "No value found for var:" + parmName);
 					return false;
@@ -244,9 +300,9 @@ public class EQLCommandLineDriver extends EQLUtilities {
 					try {
 						IASOnDemandDataSource ids = this.cursorWindowToJson("cursors." + parmName, 0, 10);
 						String idList = StringUtils.join(ids.getColumnLabels(), ",");
-						this.infoMsg("Print",  "- Cursor @" + parmName + " --------------");
-						this.infoMsg("Print", idList);
-						this.infoMsg("Print", new String(new char[idList.length()]).replace('\0',  '-'));
+						this.infoMsg("Print ",  "- Cursor @" + parmName + " --------------");
+						this.infoMsg("Print ", idList);
+						this.infoMsg("Print ", new String(new char[idList.length()]).replace('\0',  '-'));
 						int rownbr = 1;
 						for(Map<String, Object> row : ids.getData()) {
 							List<String> arow = new ArrayList<String>();
@@ -258,17 +314,17 @@ public class EQLCommandLineDriver extends EQLUtilities {
 									arow.add("");	// null is empty string for now
 							}
 							// spacesToString((2 + parmName.length()) - (Integer.toString(rownbr).length() + 3)) + "r#" + rownbr + "=" + 
-							this.infoMsg("Print", StringUtils.join(arow, ","));
+							this.infoMsg("Print ", StringUtils.join(arow, ","));
 							rownbr++;
 						}
-						this.infoMsg("Print", new String(new char[idList.length()]).replace('\0',  '-'));
+						this.infoMsg("Print ", new String(new char[idList.length()]).replace('\0',  '-'));
 						if (rownbr > 10) {
-							this.infoMsg("Print", "@" + parmName + " print stops at " + 10 + " rows");
+							this.infoMsg("Print ", "@" + parmName + " print stops at " + 10 + " rows");
 						}
 					} catch (SQLException e) {
-						this.errorMsg("Print", "@" + parmName + ":Unable to print cursor, SQL error:" + e.getMessage());
+						this.errorMsg("Print ", "@" + parmName + ":Unable to print cursor, SQL error:" + e.getMessage());
 					} catch (IOException e) {
-						this.errorMsg("Print", "@" + parmName + ":Unable to print cursor, IO error:" + e.getMessage());
+						this.errorMsg("Print ", "@" + parmName + ":Unable to print cursor, IO error:" + e.getMessage());
 					}
 				} else {
 					sbLine.append(((sbLine.length() > 0) ? " " : "") + item.toString());
@@ -278,7 +334,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 		}
 		
 		if (sbLine.length() > 0) {	// Drain any remaining static text before exiting
-			this.infoMsg("Print", sbLine.toString());
+			this.infoMsg("Print ", sbLine.toString());
 		}
 
 		return true;
@@ -360,7 +416,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 	 * @param save
 	 * @return
 	 */
-	public EQLObject exec(EQLInstruction inst, boolean save) {
+	public EQLObject exec(EQLInstruction inst, boolean save, int instructNbr) {
 		PreparedStatement stmt = null;
 		try {
 			if (conn == null || conn.isClosed()) {
@@ -379,7 +435,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 			String statement = inst.getPreparedStmt(this,  vars);
 			
 			if (save)
-				this.debugMsg(lineTitleToString(inst.getStartLine()), "Creating statement from: " + statement);
+				this.debugMsg(lineTitleToString(instructNbr), "Creating statement from: " + statement);
 			
 			// TODO: statement substitution before sending to the database
 			log.debug("Preparing statement:{}", statement);
@@ -400,30 +456,30 @@ public class EQLCommandLineDriver extends EQLUtilities {
 					currentVal = val;
 					EQLObject item = this.vars.get(val);
 					if (item.getType() == EQLObject.types.string) {
-						this.debugMsg(lineTitleToString(inst.getStartLine()), "Parm #" + seq + " named " + val + " set as string with value:" + item.toString());
+						this.debugMsg(lineTitleToString(instructNbr), "Parm #" + seq + " named " + val + " set as string with value:" + item.toString());
 						stmt.setString(idx, item.toString());
 					} else if (item.getType() == EQLObject.types.rawText) {
 						//this.debugMsg("exec", "Parm #" + idx + " named " + val + " ignored as already direct injected");
 						idx--; // drop back one as this was already direct injected
 					} else if (item.getType() == EQLObject.types.integer) {
-						this.debugMsg(lineTitleToString(inst.getStartLine()), "Parm #" + seq + " named " + val + " set as integer with value:" + item.toString());
+						this.debugMsg(lineTitleToString(instructNbr), "Parm #" + seq + " named " + val + " set as integer with value:" + item.toString());
 						stmt.setInt(idx, item.toInt());
 					} else if (item.getType() == EQLObject.types.decimal) {
-						this.debugMsg(lineTitleToString(inst.getStartLine()), "Parm #" + seq + " named " + val + " set as double with value:" + item.toString());
+						this.debugMsg(lineTitleToString(instructNbr), "Parm #" + seq + " named " + val + " set as double with value:" + item.toString());
 						stmt.setDouble(idx, item.toDouble());
 					} else {
-						this.debugMsg(lineTitleToString(inst.getStartLine()), "Parm #" + seq + " named " + val + " set as command string with value:" + item.toString());
+						this.debugMsg(lineTitleToString(instructNbr), "Parm #" + seq + " named " + val + " set as command string with value:" + item.toString());
 						stmt.setString(idx, item.toString());
 					}
 					idx++;
 					seq++;
 				}
 			} catch(SQLException se) {
-				this.errorMsg(lineTitleToString(inst.getStartLine()), "SQL Exception processing variable '" + currentVal + "'. Error is :" + se.getMessage());
+				this.errorMsg(lineTitleToString(instructNbr), "SQL Exception processing variable '" + currentVal + "'. Error is :" + se.getMessage());
 				se.printStackTrace();
 				return null;
 			} catch(NullPointerException se) {
-				this.errorMsg(lineTitleToString(inst.getStartLine()), "Failed to locate query parameter named '" + currentVal + "'. The variable is missing or not defined. Make sure to escape the database command @ symbols with \\@ if sending to the database engine.");
+				this.errorMsg(lineTitleToString(instructNbr), "Failed to locate query parameter named '" + currentVal + "'. The variable is missing or not defined. Make sure to escape the database command @ symbols with \\@ if sending to the database engine.");
 				se.printStackTrace();
 				return null;
 			}
@@ -436,28 +492,40 @@ public class EQLCommandLineDriver extends EQLUtilities {
 				else
 					ers = new EQLObject("Statement completed successfully but did not return a result, runtime:" + elapsedTimeToString(timer) + " (" + StringUtils.substring(statement, 0, 40) + ((statement.length() > 39) ? "...)" : ")"));
 				
-				this.infoMsg(lineTitleToString(inst.getStartLine()), ers.toString());
+				this.infoMsg(lineTitleToString(instructNbr), ers.toString());
 			} else {
 				rs = stmt.getResultSet();
 				ers = new EQLObject(stmt, rs);
 				if (inst.getAssignName() != null && inst.getAssignName().length() > 0) {
 					EQLObject ers_old = this.vars.put(inst.getAssignName(), ers);		// Returns old value if replacement was performed
 					this.closeCursorIfLastReference(inst.getAssignName(), ers_old);
-					this.infoMsg(lineTitleToString(inst.getStartLine()), "Results ready (@" + inst.getAssignName() + ((save)? " and @eql_last_stmt" : "") + ") runtime:" + elapsedTimeToString(timer) + " (" + StringUtils.substring(statement, 0, 40) + ((statement.length() > 39) ? "...)" : ")"));
+					this.infoMsg(
+							lineTitleToString(instructNbr),
+							"Results ready (@" + inst.getAssignName() + 
+								((save)? " and @eql_last_stmt" : "") +
+								") runtime:" + elapsedTimeToString(timer) + 
+								" (" + StringUtils.substring(statement, 0, 40).replace('\n', ' ') +
+								((statement.length() > 39) ? "...)" : ")")
+							);
 				} else if (save) {
-					this.infoMsg(lineTitleToString(inst.getStartLine()), "Results ready (@eql_last_stmt) runtime:" + elapsedTimeToString(timer) + " (" + StringUtils.substring(statement, 0, 40) + ((statement.length() > 39) ? "...)" : ")"));
+					this.infoMsg(
+							lineTitleToString(instructNbr),
+								"Results ready (@eql_last_stmt) runtime:" + elapsedTimeToString(timer) +
+								" (" + StringUtils.substring(statement, 0, 40).replace('\n', ' ') +
+								((statement.length() > 39) ? "...)" : ")")
+							);
 				}
 				if (save) {
 					EQLObject ers_old = this.vars.put("eql_last_stmt", ers);		// Returns old value if replacement was performed
 					if (ers_old != null) {
 						this.closeCursorIfLastReference("eql_last_stmt", ers_old);
 					}
-					this.debugMsg(lineTitleToString(inst.getStartLine()), "Executed query, results ready");
+					this.debugMsg(lineTitleToString(instructNbr), "Executed query, results ready");
 				}
 			}
 			return ers;
 		} catch(SQLException | NullPointerException se) {
-			this.errorMsg(lineTitleToString(inst.getStartLine()), se.getMessage());
+			this.errorMsg(lineTitleToString(instructNbr), se.getMessage());
 			//Handle errors for JDBC
 			se.printStackTrace();
 			return null;
@@ -466,7 +534,7 @@ public class EQLCommandLineDriver extends EQLUtilities {
 	
 	protected String lineTitleToString(int lineNbr) {
 		String ln = Integer.toString(lineNbr);
-		return "l#" + ln + spacesToString(5 - (2+ln.length()));
+		return "I#" + ln + spacesToString(6 - (2+ln.length()));
 	}
 	
 	protected String spacesToString(int spaces) {
@@ -649,6 +717,10 @@ public class EQLCommandLineDriver extends EQLUtilities {
 		String user = configs.get("user");
 		String pass = configs.get("pass");
 
+		this.debugMsg("engine", "connect class: " + className);
+		this.debugMsg("engine", "connect url  : " + jdbcUrl);
+		this.debugMsg("engine", "connect user : " + user);
+		
 		if (className == null)
 			throw new EQLException("Missing class entry in System Config database for '" + connectTarget + "'. Contact your site admin.");
 
@@ -683,11 +755,15 @@ public class EQLCommandLineDriver extends EQLUtilities {
 		Map<String,String> configItems = new HashMap<String,String>();
 		
 		try {
-			Properties conf = this.config;
-			configItems.put("class", conf.getProperty("eql."+target+".class"));
-			configItems.put("jdbc", conf.getProperty("eql."+target+".jdbc"));
-			configItems.put("user", conf.getProperty("eql."+target+".user", ""));
-			configItems.put("pass", conf.getProperty("eql."+target+".pass", ""));
+			if (this.config != null) {
+				Properties conf = this.config;
+				configItems.put("class", conf.getProperty("eql."+target+".class"));
+				configItems.put("jdbc", conf.getProperty("eql."+target+".jdbc"));
+				configItems.put("user", conf.getProperty("eql."+target+".user", ""));
+				configItems.put("pass", conf.getProperty("eql."+target+".pass", ""));
+			} else {
+				this.errorMsg("getConfigItem", "No config file located, must supply a -c parameter to the engine defining the connection properties.");
+			}
 		} catch (Exception e) {
 			this.errorMsg("getConfigItem", e.getMessage());
 			e.printStackTrace();

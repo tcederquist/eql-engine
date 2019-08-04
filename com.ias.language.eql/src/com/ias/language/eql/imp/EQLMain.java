@@ -12,76 +12,188 @@ import org.apache.commons.cli.ParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.ias.language.objects.EQLObject;
+
 public class EQLMain {
 	private final static Logger log = LoggerFactory.getLogger(EQLMain.class.getCanonicalName());
 
-	// Call with parms
-	// -Dconf.dir=path/to/conf
-	// -f path/to/file
-	// var="value" var2="value"
-	
+	/**
+	 * 
+	 * @param args
+	 */
 	public static void main(String[] args) {
-		log.info("Starting main thread");
+		log.info("Starting EQL Commandline mode");
 		TimeZone.setDefault(TimeZone.getTimeZone("UTC")); // Enforce UTC for all jpa data movement - problem with jpa/mysql using local timezone
-		log.info("Classpath:{}", System.getProperty("java.class.path"));
+		int returnCode = -1;
+		
+		System.out.println("");
+		System.out.println("               ███████╗ ██████╗ ██╗            ");
+		System.out.println("               ██╔════╝██╔═══██╗██║            ");
+		System.out.println("               █████╗  ██║   ██║██║            ");
+		System.out.println("               ██╔══╝  ██║▄▄ ██║██║            ");
+		System.out.println("               ███████╗╚██████╔╝███████╗       ");
+		System.out.println("               ╚══════╝ ╚══▀▀═╝ ╚══════╝       ");
+		System.out.println("                   Extended SQL                ");
+		System.out.println("       ██████╗ ██╗   ██╗    ██╗ █████╗ ███████╗");
+		System.out.println("       ██╔══██╗╚██╗ ██╔╝    ██║██╔══██╗██╔════╝");
+		System.out.println("       ██████╔╝ ╚████╔╝     ██║███████║███████╗");
+		System.out.println("       ██╔══██╗  ╚██╔╝      ██║██╔══██║╚════██║");
+		System.out.println("       ██████╔╝   ██║       ██║██║  ██║███████║");
+		System.out.println("       ╚═════╝    ╚═╝       ╚═╝╚═╝  ╚═╝╚══════╝");
+		System.out.println("       https://github.com/tcederquist/eql-engine");
+		System.out.println("       Author: Tim Cederquist");
+		System.out.println("       Apache License v2.0");
+		System.out.println("");
 
-		Properties config = EQLUtilities.getPropsLocal("websvc.properties");
-		
-		log.info("test config:{}", config.getProperty("eqlLogLevel"));
-		log.info("test config2:{}", config.getProperty("eql.ias.jdbc"));
-		
+		try {
+			//////////// Read command line options
+			//String[] a = new String[]{ "-p=eql_log_level:1,val:1,val2:\"hello\",val3:'hi there!',val_4:Stuff", "-f=d:\\test\\test.sql", "-c=d:\\test\\test.ini" };
+			//String[] a = new String[]{ "-p=val:1,val2:'hello',val3:'hi there!',val_4:Stuff", "-f=d:\\test\\test.sql", "-c=d:\\test\\test.ini", "-r=0" };
+			//String[] a = new String[]{ "-p=eql_log_level:1,mycon:ias,myval1:5,myval2:Hello,scope:AUTOMATIC,val:1,val2:hello,val3:hi there!,val_4:Stuff", "-f=d:\\test\\test.sql", "-c=d:\\test\\test.ini", "-r=8" };
+			String[] a = new String[]{ "-f=d:\\test\\test.sql" };
+
+			CommandLine cmdParms = processArgs(a);
+			String sqlFilename = cmdParms.getOptionValue("f");
+			String cfgFilename = cmdParms.getOptionValue("c");
+			boolean verbose = cmdParms.hasOption('v');
+			int restartLine = getStartInstructionNumber(cmdParms);
+			
+			if (verbose) {
+				log.info("Startup Classpath entries-----------");
+				String[] cpEntries = System.getProperty("java.class.path").split(";");
+				for (String line : cpEntries) {
+					log.info("            : {}", line);
+				}
+			}
+			
+			log.info("cmdLine: SQL file    : {}", sqlFilename);
+			log.info("cmdLine: CFG file    : {}", cfgFilename);
+			log.info("cmdLine: Restart line: {}", restartLine);
+			
+			//Check for illegal values
+			if (restartLine < 0) throw new EQLException("Illegal starting line, exiting commandline mode.");
+
+			////////// Process config file
+			Properties config = EQLUtilities.getPropsFile(cfgFilename);
+//			if (config == null) config = EQLUtilities.getPropsLocal("websvc.properties");
+//			log.info("Config : LogLevel    : {}", config.getProperty("eqlLogLevel"));
+
+			/////////// Get SQL File
+			String sql = EQLUtilities.readSQLFile(sqlFilename);
+			log.info("SQL    : read chars  : {}", sql.length());
+			
+			/////////// Drive the engine
+			if (sql != null && sql.length()> 1) {
+				EQLCommandLineDriver engine = new EQLCommandLineDriver(config);
+				engine.compile(sql);
+				log.info("Compiled SQL stmts   : {}", engine.instructions.size());
+				if (cmdParms.getOptionValues("p") != null) {
+					for(String item : cmdParms.getOptionValues("p")) {
+						String[] parts = item.split(":(?=([^\\\"]*\\\"[^\\\"]*\\\")*[^\\\"]*$)");
+						if (parts.length ==2) {
+							log.info("Parm: key: {} = {}", parts[0], parts[1]);
+							engine.setVariableDirect(parts[0], parts[1]);
+						} else {
+							throw new EQLException("Invalid value found in parm: " + item);
+						}
+					}
+				}
+				
+				try {
+					log.info("Starting execution--------------------");
+					engine.run(restartLine);
+					log.info("Execute completed---------------------");
+					if (engine.getLastCompletedInstructionNumber() != engine.instructions.size()) {
+						returnCode = 10;  // Didn't complete execution
+					} else {
+						returnCode = 0;
+					}
+				} finally {
+					System.out.println("\n=====Start EQL engine log=======================================================\n");
+					for(String msg : engine.getLogs()) {
+						System.out.println(msg);
+					}
+					System.out.println("\n=====End EQL engine log=========================================================\n");
+					log.info("Last instruction # completed:{}", engine.getLastCompletedInstructionNumber());
+						if (returnCode != 0 || verbose) {
+							StringBuilder cmdLnRestart = new StringBuilder();
+							cmdLnRestart.append("-r=" + engine.getLastCompletedInstructionNumber() + " -p=");
+							boolean separate = false;
+							for(String key : engine.vars.keySet()) {
+								if (separate) {
+									cmdLnRestart.append(",");
+								}
+								EQLObject val = engine.vars.get(key);
+								if (val.getType() != EQLObject.types.cursor) {
+									cmdLnRestart.append(key + ":" + val);
+									log.debug("Var: {}  Type:{}  Val:{}", key, val.getType(), val);
+									separate = true;
+								}
+							}
+							log.info("Restart parms list: {}", cmdLnRestart.toString());
+						}
+				}
+			}
+		} catch (EQLException e) {
+			log.error("Exiting with failure: {}", e.getLocalizedMessage());
+			if (returnCode == 0) returnCode = 10;
+		}
+	
+		//Clean-up and exit
+		log.info("Exit code:{}", returnCode);
+		if (returnCode != 0) System.exit(returnCode);
+	}
+
+	static CommandLine processArgs(String[] args) {
+		//Read command line options
+		// Call with parms
+		// -Dconf.dir=path/to/conf
+		// -f path/to/sql
+		// -c path/to/config
+		// var="value" var2="value"
 		Options options = new Options();
+		options.addOption("f", true, "SQL filename");
+		options.addOption("r", true, "Restart Instruction line #");
+		options.addOption("c", true, "Configuration filename");
 		
-		Option optionParm = Option.builder("p")
+		options.addOption(
+				Option.builder("v")
+				.hasArg(false)
+				.desc("Verbose output")
+				.build()
+				);
+		
+		options.addOption(
+				Option.builder("p")
 				.hasArgs()
 				.desc("Default variable assignments")
 				.valueSeparator(',')
 				.argName("property=value")
 				.optionalArg(true)
-				.build();
-				
-		optionParm.setArgs(Option.UNLIMITED_VALUES);
-		options.addOption(optionParm);
-		options.addOption("f", true, "SQL filename");
-		options.addOption("r", false, "Restart Instruction line #");
+				.build()
+				);
 		
-		String[] a = new String[]{ "-p=val:1,val2:\"hello\",val3:'hi there!',val_4:Stuff", "-f=d:\\temp\\test.sql" };
 		CommandLineParser parser = new DefaultParser();
 		try {
-			CommandLine line = parser.parse(options, a);
-			String sqlFilename = line.getOptionValue("f");
-			int restartLine = -1;
-			String ln = line.getOptionValue('r');
-			try {
-				if (ln == null) {  // not provided
-					restartLine = 0;
-				} else {
-					restartLine = Integer.parseInt(ln);
-				}
-			} catch (NumberFormatException e) {
-				log.warn("Illegal value for -r, expecting a line #, recieved: {}", ln);
-			}
-
-			if (restartLine < 0) throw new EQLException("Illegal starting line, exiting commandline mode.");
-			log.info("SQL file:{}", sqlFilename);
-			log.info("Restart line:{}", restartLine);
-			
-			for(String item : line.getOptionValues("p")) {
-				log.info("Parm:{}", item);
-			}
+			return parser.parse(options, args);
 		} catch (ParseException e) {
 			// TODO Auto-generated catch block
-		} catch (Exception e) {
-			e.printStackTrace();
+			log.error(e.getLocalizedMessage());
 		}
-		
-		if (args.length > 0 && args[0].equalsIgnoreCase("ondemand")) {
-			EQLCommandLineDriver engine = new EQLCommandLineDriver(config);
-			
-//			engine.compile(code);
-		}
-	
-		log.info("Exiting.");
+		return null;
 	}
-
+	
+	static int getStartInstructionNumber(CommandLine cmdLine) {
+		String ln = cmdLine.getOptionValue('r');
+		try {
+			if (ln == null) {  // not provided
+				return 0;
+			} else {
+				return Integer.parseInt(ln);
+			}
+		} catch (NumberFormatException e) {
+			log.warn("Illegal value for -r, expecting a line #, recieved: {}", ln);
+		}
+		return -1;
+	}
 }
