@@ -139,7 +139,7 @@ public class EQLMain {
 	
 		//Clean-up and exit
 		log.info("Exit code:{}", returnCode);
-		if (returnCode != 0) System.exit(returnCode);
+		System.exit(returnCode);
 	}
 
 	static CommandLine processArgs(String[] args) {
