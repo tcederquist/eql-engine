@@ -61,7 +61,7 @@
 	    <log4j-version>2.5</log4j-version>
 	    <fasterxml-version>2.9.3</fasterxml-version>
    	    <gson>2.8.0</gson>
-	    <guava>23.6-jre</guava>
+	    <guava>24.1.1-jre</guava>
 	</properties>
 	  <dependencies>
 	     <!-- 
